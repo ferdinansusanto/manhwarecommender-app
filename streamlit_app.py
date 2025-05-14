@@ -5,7 +5,11 @@ import gzip
 import os
 from sklearn.metrics.pairwise import cosine_similarity
 from googletrans import Translator
-from streamlit_star_rating import st_star_rating
+
+# Fungsi bintang rating kustom
+def star_rating(max_stars=5, default_value=3):
+    stars = st.radio("Rating:", range(1, max_stars + 1), index=default_value - 1, format_func=lambda x: "★" * x)
+    return stars
 
 # Fungsi untuk menyimpan ulasan
 def save_review(user_review):
@@ -95,7 +99,7 @@ if page == "Rekomendasi":
 elif page == "Ulasan":
     st.subheader("Ulasan Pengguna")
     username = st.text_input("Nama Pengguna:")
-    rating = st_star_rating(label="Rating (1-5):", maxValue=5, defaultValue=3, key="rating")
+    rating = star_rating()
     review_text = st.text_area("Tulis Ulasan:")
 
     if st.button("Kirim Ulasan"):
