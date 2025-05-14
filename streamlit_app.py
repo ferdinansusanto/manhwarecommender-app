@@ -6,6 +6,18 @@ import os
 from sklearn.metrics.pairwise import cosine_similarity
 from googletrans import Translator
 
+# Fungsi untuk mengupdate jumlah kunjungan
+def update_visit_count():
+    if os.path.exists('visit_count.txt'):
+        with open('visit_count.txt', 'r') as f:
+            total_visits = int(f.read().strip())
+    else:
+        total_visits = 0
+    total_visits += 1  # Tambah jumlah kunjungan
+    with open('visit_count.txt', 'w') as f:
+        f.write(str(total_visits))
+    return total_visits
+
 # Fungsi untuk menyimpan ulasan
 def save_review(user_review):
     review_df = pd.DataFrame([user_review])
