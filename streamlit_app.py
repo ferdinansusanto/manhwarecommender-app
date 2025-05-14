@@ -3,6 +3,8 @@ import pandas as pd
 import pickle
 import gzip
 import os
+from sklearn.metrics.pairwise import cosine_similarity
+from googletrans import Translator
 
 # Fungsi untuk menyimpan ulasan
 def save_review(user_review):
@@ -112,4 +114,20 @@ elif page == "Ulasan":
             'rating': rating,
             'review': review_text
         }
-        save_review
+        save_review(user_review)
+        st.success("Ulasan berhasil dikirim!")
+    # Muat dan tampilkan statistik
+    reviews = load_reviews()
+    total_visits, average_rating, total_reviews = calculate_statistics(reviews)
+    st.write(f"Jumlah Kunjungan: {total_visits}")
+    st.write(f"Rating Saat Ini: {average_rating:.2f} dari {total_reviews} ulasan")
+    # Tampilkan beberapa ulasan terbaru
+    st.subheader("Ulasan Terbaru:")
+    if not reviews.empty:
+        latest_reviews = reviews.tail(5)  # Tampilkan 5 ulasan terbaru
+        for index, row in latest_reviews.iterrows():
+            st.write(f"**{row['username']}** - Rating: {row['rating']}")
+            st.write(row['review'])
+            st.write("---")
+    else:
+        st.write("Belum ada ulasan.")
