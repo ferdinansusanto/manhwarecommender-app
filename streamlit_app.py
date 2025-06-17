@@ -5,6 +5,8 @@ import gzip
 import os
 from sklearn.metrics.pairwise import cosine_similarity
 from googletrans import Translator
+from io import BytesIO
+import xlsxwriter
 
 # Fungsi untuk mengupdate jumlah kunjungan
 def update_visit_count():
@@ -128,18 +130,48 @@ elif page == "Ulasan":
         }
         save_review(user_review)
         st.success("Ulasan berhasil dikirim!")
+
     # Muat dan tampilkan statistik
     reviews = load_reviews()
     total_visits, average_rating, total_reviews = calculate_statistics(reviews)
     st.write(f"Jumlah Kunjungan: {total_visits}")
     st.write(f"Rating Saat Ini: {average_rating:.2f} dari {total_reviews} ulasan")
+
     # Tampilkan beberapa ulasan terbaru
     st.subheader("Ulasan Terbaru:")
     if not reviews.empty:
-        latest_reviews = reviews.tail(5)  # Tampilkan 5 ulasan terbaru
+        latest_reviews = reviews.tail(5)
         for index, row in latest_reviews.iterrows():
             st.write(f"**{row['username']}** - Rating: {row['rating']}")
             st.write(row['review'])
             st.write("---")
     else:
         st.write("Belum ada ulasan.")
+
+    # Distribusi rating
+    st.subheader("Distribusi Rating:")
+    rating_counts = reviews['rating'].value_counts().sort_index()
+    for rating_val in range(1, 6):
+        count = rating_counts.get(rating_val, 0)
+        st.write(f"Rating {rating_val}: {count} pengguna")
+
+    # Semua ulasan
+    st.subheader("Semua Ulasan:")
+    st.dataframe(reviews)
+
+    # Unduh data sebagai Excel
+    st.subheader("Unduh Data Ulasan:")
+    def convert_df_to_excel(df):
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Ulasan')
+            writer.save()
+        return output.getvalue()
+
+    excel_data = convert_df_to_excel(reviews)
+    st.download_button(
+        label="📥 Unduh sebagai Excel",
+        data=excel_data,
+        file_name='ulasan_pengguna.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
