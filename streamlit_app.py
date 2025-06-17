@@ -49,7 +49,7 @@ page = st.sidebar.selectbox("Select Page:", ["Recommendation", "Review"])
 if page == "Recommendation":
     st.subheader("Recommendation Page")
 
-    mode = st.radio("Select Recommendation Mode:", ["By Title“, ”By Keyword"])
+    mode = st.radio("Select Recommendation Mode:", ["By Title", "By Keyword"])
 
     # Fitur Terjemahan
     translator = Translator()
