@@ -165,7 +165,6 @@ elif page == "Ulasan":
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='Ulasan')
-            writer.save()
         return output.getvalue()
 
     excel_data = convert_df_to_excel(reviews)
