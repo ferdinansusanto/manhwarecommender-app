@@ -5,18 +5,8 @@ import gzip
 import os
 from sklearn.metrics.pairwise import cosine_similarity
 from googletrans import Translator
-
-# Fungsi untuk mengupdate jumlah kunjungan
-def update_visit_count():
-    if os.path.exists('visit_count.txt'):
-        with open('visit_count.txt', 'r') as f:
-            total_visits = int(f.read().strip())
-    else:
-        total_visits = 0
-    total_visits += 1  # Tambah jumlah kunjungan
-    with open('visit_count.txt', 'w') as f:
-        f.write(str(total_visits))
-    return total_visits
+from io import BytesIO
+import xlsxwriter
 
 # Fungsi untuk menyimpan ulasan
 def save_review(user_review):
@@ -51,15 +41,15 @@ with gzip.open('tag_vectors.pkl.gz', 'rb') as f:
     tag_vectors = pickle.load(f)
 
 # Setup UI
-st.title('📚 Manhwa Recommender System')
+st.title('Manhwa Recommender System')
 
 # Sidebar untuk navigasi
-page = st.sidebar.selectbox("Pilih Halaman:", ["Rekomendasi", "Ulasan"])
+page = st.sidebar.selectbox("Select Page:", ["Recommendation", "Review"])
 
-if page == "Rekomendasi":
-    st.subheader("Halaman Rekomendasi")
+if page == "Recommendation":
+    st.subheader("Recommendation Page")
 
-    mode = st.radio("Pilih mode rekomendasi:", ["Berdasarkan Judul", "Berdasarkan Keyword Bebas"])
+    mode = st.radio("Select Recommendation Mode:", ["By Title", "By Keyword"])
 
     # Fitur Terjemahan
     translator = Translator()
@@ -93,53 +83,84 @@ if page == "Rekomendasi":
         return results
 
     # Mode: Judul
-    if mode == "Berdasarkan Judul":
-        selected_title = st.selectbox("Pilih judul manhwa:", manhwas['title'].values)
-        if st.button("Rekomendasikan"):
+    if mode == "By Title":
+        selected_title = st.selectbox("Choose a Manhwa Title:", manhwas['title'].values)
+        if st.button("Find Recommendations"):
             results = recommend_by_title(selected_title)
-            st.subheader("Rekomendasi:")
+            st.subheader("Recommendations:")
             for title, img_url in results:
                 st.image(img_url, width=120)
                 st.markdown(f"**{title}**")
 
     # Mode: Keyword
-    elif mode == "Berdasarkan Keyword Bebas":
-        user_input = st.text_input("Masukkan keyword bebas (genre, gaya cerita, dll):")
-        if st.button("Cari Rekomendasi"):
+    elif mode == "By Keyword":
+        user_input = st.text_input("Enter free keywords (genre, story style, etc.):")
+        if st.button("Find Recommendations"):
             results = recommend_by_keyword(user_input)
-            st.subheader("Rekomendasi:")
+            st.subheader("Recommendations:")
             for title, img_url in results:
                 st.image(img_url, width=120)
                 st.markdown(f"**{title}**")
 
-elif page == "Ulasan":
-    st.subheader("Ulasan Pengguna")
+elif page == "Review":
+    st.subheader("User Review")
 
     # Kumpulkan Ulasan dari Pengguna
-    username = st.text_input("Nama Pengguna:")
+    username = st.text_input("User Name:")
     rating = st.slider("Rating (1-5):", 1, 5)
-    review_text = st.text_area("Tulis Ulasan:")
+    review_text = st.text_area("Write a Review:")
 
-    if st.button("Kirim Ulasan"):
+    if st.button("Submit a Review"):
         user_review = {
             'username': username,
             'rating': rating,
             'review': review_text
         }
         save_review(user_review)
-        st.success("Ulasan berhasil dikirim!")
+        st.success("Review submitted successfully!")
+
     # Muat dan tampilkan statistik
     reviews = load_reviews()
     total_visits, average_rating, total_reviews = calculate_statistics(reviews)
-    st.write(f"Jumlah Kunjungan: {total_visits}")
-    st.write(f"Rating Saat Ini: {average_rating:.2f} dari {total_reviews} ulasan")
+    # st.write(f"Jumlah Kunjungan: {total_visits}")
+    st.write(f"Current Rating: {average_rating:.2f} from {total_reviews} reviews")
+
+    # Distribusi rating
+    st.subheader("Rating Distribution:")
+    rating_counts = reviews['rating'].value_counts().sort_index()
+    for rating_val in range(1, 6):
+        count = rating_counts.get(rating_val, 0)
+        st.write(f"Rating {rating_val}: {count} User")
+
     # Tampilkan beberapa ulasan terbaru
-    st.subheader("Ulasan Terbaru:")
+    st.subheader("Latest Review:")
     if not reviews.empty:
-        latest_reviews = reviews.tail(5)  # Tampilkan 5 ulasan terbaru
+        latest_reviews = reviews.tail(5)
         for index, row in latest_reviews.iterrows():
             st.write(f"**{row['username']}** - Rating: {row['rating']}")
             st.write(row['review'])
             st.write("---")
     else:
-        st.write("Belum ada ulasan.")
+        st.write("No reviews yet.")
+
+    # Unduh data sebagai Excel
+    st.subheader("Download Review Data:")
+    def convert_df_to_excel(df):
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Ulasan')
+        return output.getvalue()
+
+    excel_data = convert_df_to_excel(reviews)
+    st.download_button(
+        label="📥 Download as Excel",
+        data=excel_data,
+        file_name='ulasan_pengguna.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    
+    # Semua ulasan
+    st.subheader("All Reviews:")
+    st.dataframe(reviews)
+
+
