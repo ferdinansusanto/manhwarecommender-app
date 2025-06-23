@@ -7,6 +7,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 from googletrans import Translator
 from io import BytesIO
 import xlsxwriter
+import html
+import textwrap
 
 # Fungsi untuk menyimpan ulasan
 def save_review(user_review):
@@ -21,7 +23,7 @@ def load_reviews():
 
 # Fungsi untuk menghitung statistik
 def calculate_statistics(reviews):
-    total_visits = 0  # Ganti dengan logika untuk menghitung kunjungan
+    total_visits = 0  # Ganti dengan logika jika tersedia
     average_rating = reviews['rating'].mean() if not reviews.empty else 0
     total_reviews = len(reviews)
     return total_visits, average_rating, total_reviews
@@ -46,14 +48,13 @@ st.title('Manhwa Recommender System')
 # Sidebar untuk navigasi
 page = st.sidebar.selectbox("Select Page:", ["Recommendation", "Review"])
 
+# Halaman Recommendation
 if page == "Recommendation":
     st.subheader("Recommendation Page")
 
     mode = st.radio("Select Recommendation Mode:", ["By Title", "By Keyword"])
 
-    # Fitur Terjemahan
     translator = Translator()
-
     def translate_to_english(text):
         translated = translator.translate(text, src='id', dest='en')
         return translated.text
@@ -67,7 +68,14 @@ if page == "Recommendation":
         results = []
         for i in manhwa_list:
             row = manhwas.iloc[i[0]]
-            results.append((row['title'], row['cover_url']))
+            results.append({
+                'title': row['title'],
+                'cover_url': row['cover_url'],
+                'synopsis': row['synopsis'],
+                'genres': row['genres'],
+                'authors': row['authors'],
+                'score': row['score']
+            })
         return results
 
     # Fungsi Rekomendasi Berdasarkan Keyword
@@ -79,33 +87,98 @@ if page == "Recommendation":
         results = []
         for i in top_indices:
             row = manhwas.iloc[i]
-            results.append((row['title'], row['cover_url']))
+            results.append({
+                'title': row['title'],
+                'cover_url': row['cover_url'],
+                'synopsis': row['synopsis'],
+                'genres': row['genres'],
+                'authors': row['authors'],
+                'score': row['score']
+            })
         return results
 
-    # Mode: Judul
+    # Mode: By Title
     if mode == "By Title":
         selected_title = st.selectbox("Choose a Manhwa Title:", manhwas['title'].values)
         if st.button("Find Recommendations"):
             results = recommend_by_title(selected_title)
-            st.subheader("Recommendations:")
-            for title, img_url in results:
-                st.image(img_url, width=120)
-                st.markdown(f"**{title}**")
 
-    # Mode: Keyword
+            st.subheader("Recommendations:")
+            for item in results:
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    st.image(item['cover_url'], width=120)
+                with col2:
+                    st.markdown(f"### {item['title']}")
+                    st.markdown(f"**Author:** {item['authors']}")
+                    st.markdown(f"**Genre:** {item['genres']}")
+                    st.markdown(f"**Score:** {item['score']}")
+                    synopsis_preview = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
+                    if st.toggle(f"Show synopsis for {item['title']}", key=item['title']):
+                        st.markdown(html.escape(item['synopsis']))
+                    else:
+                        st.markdown(html.escape(synopsis_preview))
+                st.markdown("---")
+
+            st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
+
+            # Form review langsung di bawah hasil rekomendasi
+            with st.expander("📬 Submit a Review for a Manhwa"):
+                username = st.text_input("User Name (Recommendation Page):", key='rec_username')
+                rating = st.slider("Rating (1-5):", 1, 5, key='rec_rating')
+                review_text = st.text_area("Write a Review:", key='rec_review')
+                if st.button("Submit Review", key='submit_rec'):
+                    user_review = {
+                        'username': username,
+                        'rating': rating,
+                        'review': review_text
+                    }
+                    save_review(user_review)
+                    st.success("Review submitted successfully from Recommendation Page!")
+
+    # Mode: By Keyword
     elif mode == "By Keyword":
         user_input = st.text_input("Enter free keywords (genre, story style, etc.):")
         if st.button("Find Recommendations"):
             results = recommend_by_keyword(user_input)
-            st.subheader("Recommendations:")
-            for title, img_url in results:
-                st.image(img_url, width=120)
-                st.markdown(f"**{title}**")
 
+            st.subheader("Recommendations:")
+            for item in results:
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    st.image(item['cover_url'], width=120)
+                with col2:
+                    st.markdown(f"### {item['title']}")
+                    st.markdown(f"**Author:** {item['authors']}")
+                    st.markdown(f"**Genre:** {item['genres']}")
+                    st.markdown(f"**Score:** {item['score']}")
+                    synopsis_preview = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
+                    if st.toggle(f"Show synopsis for {item['title']}", key=item['title']):
+                        st.markdown(html.escape(item['synopsis']))
+                    else:
+                        st.markdown(html.escape(synopsis_preview))
+                st.markdown("---")
+
+            st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
+
+            # Form review langsung di bawah hasil rekomendasi
+            with st.expander("📬 Submit a Review for a Manhwa"):
+                username = st.text_input("User Name (Recommendation Page):", key='rec_username2')
+                rating = st.slider("Rating (1-5):", 1, 5, key='rec_rating2')
+                review_text = st.text_area("Write a Review:", key='rec_review2')
+                if st.button("Submit Review", key='submit_rec2'):
+                    user_review = {
+                        'username': username,
+                        'rating': rating,
+                        'review': review_text
+                    }
+                    save_review(user_review)
+                    st.success("Review submitted successfully from Recommendation Page!")
+
+# Halaman Review
 elif page == "Review":
     st.subheader("User Review")
 
-    # Kumpulkan Ulasan dari Pengguna
     username = st.text_input("User Name:")
     rating = st.slider("Rating (1-5):", 1, 5)
     review_text = st.text_area("Write a Review:")
@@ -119,10 +192,9 @@ elif page == "Review":
         save_review(user_review)
         st.success("Review submitted successfully!")
 
-    # Muat dan tampilkan statistik
+    # Muat statistik
     reviews = load_reviews()
     total_visits, average_rating, total_reviews = calculate_statistics(reviews)
-    # st.write(f"Jumlah Kunjungan: {total_visits}")
     st.write(f"Current Rating: {average_rating:.2f} from {total_reviews} reviews")
 
     # Distribusi rating
@@ -132,7 +204,7 @@ elif page == "Review":
         count = rating_counts.get(rating_val, 0)
         st.write(f"Rating {rating_val}: {count} User")
 
-    # Tampilkan beberapa ulasan terbaru
+    # Tampilkan ulasan terbaru
     st.subheader("Latest Review:")
     if not reviews.empty:
         latest_reviews = reviews.tail(5)
@@ -143,7 +215,7 @@ elif page == "Review":
     else:
         st.write("No reviews yet.")
 
-    # Unduh data sebagai Excel
+    # Download ke Excel
     st.subheader("Download Review Data:")
     def convert_df_to_excel(df):
         output = BytesIO()
@@ -158,7 +230,7 @@ elif page == "Review":
         file_name='ulasan_pengguna.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-    
+
     # Semua ulasan
     st.subheader("All Reviews:")
     st.dataframe(reviews)
