@@ -95,8 +95,8 @@ if page == "Recommendation":
             })
         return results
 
-    if 'expanded_synopsis' not in st.session_state:
-        st.session_state.expanded_synopsis = {}
+    if 'results' not in st.session_state:
+        st.session_state.results = []
 
     results = None
 
@@ -104,21 +104,24 @@ if page == "Recommendation":
         selected_title = st.selectbox("Choose a Manhwa Title:", manhwas['title'].values)
         if st.button("Find Recommendations"):
             st.session_state.results = recommend_by_title(selected_title)
-            st.session_state.expanded_synopsis.clear()
 
     elif mode == "By Keyword":
         user_input = st.text_input("Enter free keywords (genre, story style, etc.):")
         if st.button("Find Recommendations"):
             st.session_state.results = recommend_by_keyword(user_input)
-            st.session_state.expanded_synopsis.clear()
 
-    # Tampilkan rekomendasi jika tersedia
-    if 'results' in st.session_state:
-        results = st.session_state.results
+    # Handle query parameters for expand/collapse
+    query_params = st.experimental_get_query_params()
+    expand_idx = query_params.get("expand", [None])[0]
+    collapse_idx = query_params.get("collapse", [None])[0]
+
+    results = st.session_state.results
+
+    if results:
         st.subheader("Recommendations:")
 
         for idx, item in enumerate(results):
-            key = f"synopsis_{idx}"
+            key = str(idx)
             col1, col2 = st.columns([1, 3])
             with col1:
                 st.image(item['cover_url'], width=120)
@@ -128,17 +131,21 @@ if page == "Recommendation":
                 st.markdown(f"**Genre:** {item['genres']}")
                 st.markdown(f"**Score:** {item['score']}")
 
-                if not st.session_state.expanded_synopsis.get(key, False):
-                    short_synopsis = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
-                    if st.markdown(f"{html.escape(short_synopsis)} [**Read more**](#{key})", unsafe_allow_html=True):
-                        pass  # Displayed as text
-                    if st.button("Read More", key=f"btn_{key}"):
-                        st.session_state.expanded_synopsis[key] = True
-                        st.experimental_rerun()
-                else:
+                if expand_idx == key:
+                    # Full synopsis
                     st.markdown(html.escape(item['synopsis']))
                     st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
+                    st.markdown(f"[🔽 Show less](?collapse={key})", unsafe_allow_html=True)
+                else:
+                    # Short synopsis
+                    short = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
+                    st.markdown(f"{html.escape(short)} [**Read more**](?expand={key})", unsafe_allow_html=True)
+
             st.markdown("---")
+
+        # Reset query param so it doesn't persist
+        if expand_idx or collapse_idx:
+            st.experimental_set_query_params()
 
         # Form review langsung di bawah rekomendasi
         with st.expander("📬 Submit a Review for a Manhwa"):
