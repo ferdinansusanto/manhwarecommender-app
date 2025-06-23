@@ -234,5 +234,3 @@ elif page == "Review":
     # Semua ulasan
     st.subheader("All Reviews:")
     st.dataframe(reviews)
-
-
