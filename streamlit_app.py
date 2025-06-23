@@ -23,7 +23,7 @@ def load_reviews():
 
 # Fungsi untuk menghitung statistik
 def calculate_statistics(reviews):
-    total_visits = 0  # Ganti dengan logika jika tersedia
+    total_visits = 0  # Placeholder
     average_rating = reviews['rating'].mean() if not reviews.empty else 0
     total_reviews = len(reviews)
     return total_visits, average_rating, total_reviews
@@ -45,26 +45,22 @@ with gzip.open('tag_vectors.pkl.gz', 'rb') as f:
 # Setup UI
 st.title('Manhwa Recommender System')
 
-# Sidebar untuk navigasi
+# Sidebar
 page = st.sidebar.selectbox("Select Page:", ["Recommendation", "Review"])
 
-# Halaman Recommendation
+# --- PAGE: RECOMMENDATION ---
 if page == "Recommendation":
     st.subheader("Recommendation Page")
-
     mode = st.radio("Select Recommendation Mode:", ["By Title", "By Keyword"])
 
     translator = Translator()
     def translate_to_english(text):
-        translated = translator.translate(text, src='id', dest='en')
-        return translated.text
+        return translator.translate(text, src='id', dest='en').text
 
-    # Fungsi Rekomendasi Berdasarkan Judul
     def recommend_by_title(selected_title):
         idx = manhwas[manhwas['title'] == selected_title].index[0]
         distances = similarity[idx]
         manhwa_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
-        
         results = []
         for i in manhwa_list:
             row = manhwas.iloc[i[0]]
@@ -78,12 +74,10 @@ if page == "Recommendation":
             })
         return results
 
-    # Fungsi Rekomendasi Berdasarkan Keyword
     def recommend_by_keyword(user_input):
         user_vec = tag_vectorizer.transform([user_input])
         scores = cosine_similarity(user_vec, tag_vectors).flatten()
         top_indices = scores.argsort()[::-1][:5]
-        
         results = []
         for i in top_indices:
             row = manhwas.iloc[i]
@@ -97,14 +91,13 @@ if page == "Recommendation":
             })
         return results
 
-    # Mode: By Title
     if mode == "By Title":
         selected_title = st.selectbox("Choose a Manhwa Title:", manhwas['title'].values)
         if st.button("Find Recommendations"):
             results = recommend_by_title(selected_title)
 
             st.subheader("Recommendations:")
-            for item in results:
+            for idx, item in enumerate(results):
                 col1, col2 = st.columns([1, 3])
                 with col1:
                     st.image(item['cover_url'], width=120)
@@ -113,16 +106,17 @@ if page == "Recommendation":
                     st.markdown(f"**Author:** {item['authors']}")
                     st.markdown(f"**Genre:** {item['genres']}")
                     st.markdown(f"**Score:** {item['score']}")
-                    synopsis_preview = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
-                    if st.toggle(f"Show synopsis for {item['title']}", key=item['title']):
+
+                    preview = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
+                    show_full = st.button("🔍 Read More", key=f"btn_{idx}")
+                    if show_full:
                         st.markdown(html.escape(item['synopsis']))
+                        st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
                     else:
-                        st.markdown(html.escape(synopsis_preview))
+                        st.markdown(html.escape(preview))
+
                 st.markdown("---")
 
-            st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
-
-            # Form review langsung di bawah hasil rekomendasi
             with st.expander("📬 Submit a Review for a Manhwa"):
                 username = st.text_input("User Name (Recommendation Page):", key='rec_username')
                 rating = st.slider("Rating (1-5):", 1, 5, key='rec_rating')
@@ -136,14 +130,13 @@ if page == "Recommendation":
                     save_review(user_review)
                     st.success("Review submitted successfully from Recommendation Page!")
 
-    # Mode: By Keyword
     elif mode == "By Keyword":
         user_input = st.text_input("Enter free keywords (genre, story style, etc.):")
         if st.button("Find Recommendations"):
             results = recommend_by_keyword(user_input)
 
             st.subheader("Recommendations:")
-            for item in results:
+            for idx, item in enumerate(results):
                 col1, col2 = st.columns([1, 3])
                 with col1:
                     st.image(item['cover_url'], width=120)
@@ -152,16 +145,17 @@ if page == "Recommendation":
                     st.markdown(f"**Author:** {item['authors']}")
                     st.markdown(f"**Genre:** {item['genres']}")
                     st.markdown(f"**Score:** {item['score']}")
-                    synopsis_preview = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
-                    if st.toggle(f"Show synopsis for {item['title']}", key=item['title']):
+
+                    preview = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
+                    show_full = st.button("🔍 Read More", key=f"btn_kw_{idx}")
+                    if show_full:
                         st.markdown(html.escape(item['synopsis']))
+                        st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
                     else:
-                        st.markdown(html.escape(synopsis_preview))
+                        st.markdown(html.escape(preview))
+
                 st.markdown("---")
 
-            st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
-
-            # Form review langsung di bawah hasil rekomendasi
             with st.expander("📬 Submit a Review for a Manhwa"):
                 username = st.text_input("User Name (Recommendation Page):", key='rec_username2')
                 rating = st.slider("Rating (1-5):", 1, 5, key='rec_rating2')
@@ -175,7 +169,7 @@ if page == "Recommendation":
                     save_review(user_review)
                     st.success("Review submitted successfully from Recommendation Page!")
 
-# Halaman Review
+# --- PAGE: REVIEW ---
 elif page == "Review":
     st.subheader("User Review")
 
@@ -192,19 +186,16 @@ elif page == "Review":
         save_review(user_review)
         st.success("Review submitted successfully!")
 
-    # Muat statistik
     reviews = load_reviews()
     total_visits, average_rating, total_reviews = calculate_statistics(reviews)
     st.write(f"Current Rating: {average_rating:.2f} from {total_reviews} reviews")
 
-    # Distribusi rating
     st.subheader("Rating Distribution:")
     rating_counts = reviews['rating'].value_counts().sort_index()
     for rating_val in range(1, 6):
         count = rating_counts.get(rating_val, 0)
         st.write(f"Rating {rating_val}: {count} User")
 
-    # Tampilkan ulasan terbaru
     st.subheader("Latest Review:")
     if not reviews.empty:
         latest_reviews = reviews.tail(5)
@@ -215,7 +206,6 @@ elif page == "Review":
     else:
         st.write("No reviews yet.")
 
-    # Download ke Excel
     st.subheader("Download Review Data:")
     def convert_df_to_excel(df):
         output = BytesIO()
@@ -231,6 +221,5 @@ elif page == "Review":
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
 
-    # Semua ulasan
     st.subheader("All Reviews:")
     st.dataframe(reviews)
