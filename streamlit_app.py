@@ -111,9 +111,9 @@ if page == "Recommendation":
             st.session_state.results = recommend_by_keyword(user_input)
 
     # Handle query parameters for expand/collapse
-    query_params = st.experimental_get_query_params()
-    expand_idx = query_params.get("expand", [None])[0]
-    collapse_idx = query_params.get("collapse", [None])[0]
+    query_params = st.query_params
+    expand_idx = query_params.get("expand", None)
+    collapse_idx = query_params.get("collapse", None)
 
     results = st.session_state.results
 
@@ -145,7 +145,7 @@ if page == "Recommendation":
 
         # Reset query param so it doesn't persist
         if expand_idx or collapse_idx:
-            st.experimental_set_query_params()
+            st.query_params.clear()
 
         # Form review langsung di bawah rekomendasi
         with st.expander("📬 Submit a Review for a Manhwa"):
