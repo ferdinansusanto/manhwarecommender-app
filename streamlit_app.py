@@ -25,7 +25,7 @@ def load_reviews():
 def calculate_statistics(reviews):
     average_rating = reviews['rating'].mean() if not reviews.empty else 0
     total_reviews = len(reviews)
-    total_visits = 0  # Tambahkan logika jika tersedia
+    total_visits = 0
     return total_visits, average_rating, total_reviews
 
 # Load data
@@ -59,7 +59,6 @@ if page == "Recommendation":
         translated = translator.translate(text, src='id', dest='en')
         return translated.text
 
-    # Fungsi Rekomendasi Judul
     def recommend_by_title(selected_title):
         idx = manhwas[manhwas['title'] == selected_title].index[0]
         distances = similarity[idx]
@@ -77,7 +76,6 @@ if page == "Recommendation":
             })
         return results
 
-    # Fungsi Rekomendasi Keyword
     def recommend_by_keyword(user_input):
         user_vec = tag_vectorizer.transform([user_input])
         scores = cosine_similarity(user_vec, tag_vectors).flatten()
@@ -95,56 +93,48 @@ if page == "Recommendation":
             })
         return results
 
-    # Inisialisasi state
-    if 'expanded_synopsis' not in st.session_state:
-        st.session_state.expanded_synopsis = {}
     if 'results' not in st.session_state:
         st.session_state.results = []
 
-    # Input pengguna
+    # Input
     if mode == "By Title":
         selected_title = st.selectbox("Choose a Manhwa Title:", manhwas['title'].values)
         if st.button("Find Recommendations"):
             st.session_state.results = recommend_by_title(selected_title)
-            st.session_state.expanded_synopsis.clear()
 
     elif mode == "By Keyword":
         user_input = st.text_input("Enter free keywords (genre, story style, etc.):")
         if st.button("Find Recommendations"):
             st.session_state.results = recommend_by_keyword(user_input)
-            st.session_state.expanded_synopsis.clear()
 
-    # Tampilkan rekomendasi
     results = st.session_state.results
     if results:
         st.subheader("Recommendations:")
+
         for idx, item in enumerate(results):
-            key = f"synopsis_{idx}"
             col1, col2 = st.columns([1, 3])
             with col1:
                 st.image(item['cover_url'], width=120)
+
             with col2:
                 st.markdown(f"### {item['title']}")
                 st.markdown(f"**Author:** {item['authors']}")
                 st.markdown(f"**Genre:** {item['genres']}")
                 st.markdown(f"**Score:** {item['score']}")
 
-                is_expanded = st.session_state.expanded_synopsis.get(key, False)
+                checkbox_key = f"show_synopsis_{idx}"
+                show_full = st.checkbox("📖 Show full synopsis", key=checkbox_key)
 
-                if is_expanded:
+                if show_full:
                     st.markdown(html.escape(item['synopsis']))
                     st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
-                    if st.button("🔽 Read Less", key=f"btn_less_{idx}"):
-                        st.session_state.expanded_synopsis[key] = False
                 else:
                     short = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
                     st.markdown(html.escape(short))
-                    if st.button("🔍 Read More", key=f"btn_more_{idx}"):
-                        st.session_state.expanded_synopsis[key] = True
 
             st.markdown("---")
 
-        # Form review langsung
+        # Formulir review
         with st.expander("📬 Submit a Review for a Manhwa"):
             username = st.text_input("User Name:", key="rec_username")
             rating = st.slider("Rating (1-5):", 1, 5, key="rec_rating")
@@ -175,19 +165,16 @@ elif page == "Review":
         save_review(user_review)
         st.success("Review submitted successfully!")
 
-    # Statistik ulasan
     reviews = load_reviews()
     total_visits, average_rating, total_reviews = calculate_statistics(reviews)
     st.write(f"Current Rating: {average_rating:.2f} from {total_reviews} reviews")
 
-    # Distribusi rating
     st.subheader("Rating Distribution:")
     rating_counts = reviews['rating'].value_counts().sort_index()
     for rating_val in range(1, 6):
         count = rating_counts.get(rating_val, 0)
         st.write(f"Rating {rating_val}: {count} User")
 
-    # Tampilkan ulasan terbaru
     st.subheader("Latest Review:")
     if not reviews.empty:
         latest_reviews = reviews.tail(5)
@@ -198,7 +185,6 @@ elif page == "Review":
     else:
         st.write("No reviews yet.")
 
-    # Download ke Excel
     st.subheader("Download Review Data:")
     def convert_df_to_excel(df):
         output = BytesIO()
@@ -214,6 +200,5 @@ elif page == "Review":
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
 
-    # Semua ulasan
     st.subheader("All Reviews:")
     st.dataframe(reviews)
