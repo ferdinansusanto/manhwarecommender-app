@@ -45,13 +45,13 @@ try:
         manhwa_dict = pickle.load(f)
     manhwas = pd.DataFrame(manhwa_dict)
     if 'title' not in manhwas.columns:
-        st.error("Kolom 'title' tidak ditemukan di dataset manhwa_dict_with_cover.pkl.gz")
+        st.error("The 'title' column was not found in the dataset manhwa_dict_with_cover.pkl.gz")
         st.stop()
     # normalize titles as strings
     manhwas['title'] = manhwas['title'].astype(str)
     titles_list_all = manhwas['title'].dropna().astype(str).tolist()
 except Exception as e:
-    st.error(f"Error memuat dataset manhwa: {e}")
+    st.error(f"Error loading manhwa dataset: {e}")
     st.stop()
 
 try:
@@ -59,9 +59,9 @@ try:
         similarity = pickle.load(f)
     # basic consistency check
     if len(similarity) != len(manhwas):
-        st.warning("Peringatan: panjang similarity matrix tidak sama dengan jumlah manhwa. Periksa indexing jika rekomendasi berperilaku aneh.")
+        st.warning("Warning: the length of the similarity matrix is not equal to the number of manhwa. Check the indexing if the recommendations behave strangely.")
 except Exception as e:
-    st.error(f"Error memuat similarity matrix: {e}")
+    st.error(f"Error loading similarity matrix: {e}")
     st.stop()
 
 try:
@@ -119,14 +119,14 @@ def recommend_by_title(selected_title, top_n):
 
 def recommend_by_keyword(user_input, top_n):
     if tag_vectorizer is None or tag_vectors is None:
-        st.error("Keyword recommendation tidak tersedia karena vectorizer/vectors tidak ditemukan.")
+        st.error("Keyword recommendation is not available because vectorizer/vectors were not found.")
         return []
     try:
         user_vec = tag_vectorizer.transform([user_input])
         scores = cosine_similarity(user_vec, tag_vectors).flatten()
         top_indices = scores.argsort()[::-1][:top_n]
     except Exception as e:
-        st.error(f"Error saat menghitung rekomendasi keyword: {e}")
+        st.error(f"Error when calculating keyword recommendations: {e}")
         return []
     results = []
     for i in top_indices:
@@ -164,7 +164,7 @@ if page == "Recommendation":
 
     # ---------- By Title ----------
     if mode == "By Title":
-        st.markdown("Ketik sebagian judul di bawah — dropdown akan menampilkan *combined matching*: substring/full matches (jika ada) atau top fuzzy suggestions (jika tidak ada substring match).")
+        st.markdown("Type part of the title below, then choose the manhwa in the dataset.")
 
         # text input for typing query
         title_input = st.text_input("Type the Manhwa Title:", key="title_input")
@@ -183,7 +183,7 @@ if page == "Recommendation":
                 dropdown_display_options = substring_matches
                 for t in substring_matches:
                     display_to_real[t] = t
-                st.info(f"Menampilkan {len(substring_matches)} hasil substring match.")
+                st.info(f"Displaying {len(substring_matches)} title matches.")
             else:
                 # fallback to fuzzy matching
                 fuzzy = find_fuzzy_labels(q, titles_list_all, limit=FUZZY_LIMIT)
@@ -191,10 +191,10 @@ if page == "Recommendation":
                     dropdown_display_options = [label for label, real in fuzzy]
                     for label, real in fuzzy:
                         display_to_real[label] = real
-                    st.info("Tidak ada substring match — menampilkan suggestion terdekat (typo correction).")
+                    st.info("The title doesn't match — showing the closest suggestion (typo correction).")
                 else:
                     dropdown_display_options = []
-                    st.warning("Tidak ditemukan judul yang cocok atau mirip di dataset.")
+                    st.warning("There were no matching or similar titles found in the dataset.")
         else:
             # when input empty, we still may want to show some popular options or all titles (capped)
             dropdown_display_options = titles_list_all[:SUBSTRING_MAX_OPTIONS]
@@ -202,7 +202,7 @@ if page == "Recommendation":
                 display_to_real[t] = t
 
         if dropdown_display_options:
-            selected_display = st.selectbox("Choose a Manhwa Title:", dropdown_display_options, key="selectbox_title")
+            selected_display = st.selectbox("Select a Manhwa title from the dataset.:", dropdown_display_options, key="selectbox_title")
             # map back to real title
             selected_title = display_to_real.get(selected_display, selected_display)
         else:
@@ -212,7 +212,7 @@ if page == "Recommendation":
         # Find Recommendations button: immediately show default 5 recommendations including the selected title
         if st.button("Find Recommendations", key='find_by_title'):
             if not selected_title:
-                st.warning("Silakan pilih judul terlebih dahulu dari dropdown.")
+                st.warning("Please select a title from the dataset first.")
             else:
                 st.session_state.selected_title_for_recommendation = selected_title
                 st.session_state.results = recommend_by_title(selected_title, 5)
@@ -241,19 +241,19 @@ if page == "Recommendation":
 
     # ---------- By Keyword ----------
     elif mode == "By Keyword":
-        st.markdown("Masukkan kata kunci (genre, deskripsi, gaya cerita) untuk mencari rekomendasi berdasarkan tag/content.")
-        user_input = st.text_input("Enter free keywords (genre, story style, etc.):", key="keyword_input")
+        st.markdown("Enter keywords freely. These can include title, genre, description, author, story style, or else. You can find recommendations by entering keywords.")
+        user_input = st.text_input("Enter your keywords here:", key="keyword_input")
 
         if st.button("Find Recommendations", key='find_by_keyword'):
             if not user_input or not user_input.strip():
-                st.warning("Silakan masukkan kata kunci.")
+                st.warning("Please enter your keywords.")
             else:
                 st.session_state.selected_title_for_recommendation = None
                 st.session_state.results = recommend_by_keyword(user_input.strip(), 5)
 
         # quick-size buttons for keyword mode too (applies if results exist)
         if st.session_state.results:
-            st.markdown("**Quick change jumlah rekomendasi**")
+            st.markdown("**Quick change number of recommendations**")
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 if st.button("5", key="kbtn_5"):
@@ -298,8 +298,10 @@ if page == "Recommendation":
                 if show_full:
                     st.markdown(html.escape(item.get('synopsis','')))
                     # Link to Webtoon search (encoded) — open in new tab
-                    webtoon_search_url = "https://www.webtoons.com/id/search?keyword=" + urllib.parse.quote(item['title'])
-                    st.markdown(f'<a href="{webtoon_search_url}" target="_blank" rel="noopener">🔍 Baca/ Cari di Webtoon</a>', unsafe_allow_html=True)
+                    webtoon_search_url_id = "https://www.webtoons.com/id/search?keyword=" + urllib.parse.quote(item['title'])
+                    st.markdown(f'<a href="{webtoon_search_url_id}" target="_blank" rel="noopener">🔍 Read/Search on Webtoon(Indonesia)</a>', unsafe_allow_html=True)
+                    webtoon_search_url_en = "https://www.webtoons.com/en/search?keyword=" + urllib.parse.quote(item['title'])
+                    st.markdown(f'<a href="{webtoon_search_url_en}" target="_blank" rel="noopener">🔍 Read/Search on Webtoon(English)</a>', unsafe_allow_html=True)
                 else:
                     short = textwrap.shorten(item.get('synopsis',''), width=200, placeholder="...")
                     st.markdown(html.escape(short))
