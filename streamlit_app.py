@@ -9,6 +9,8 @@ from io import BytesIO
 import xlsxwriter
 import html
 import textwrap
+from rapidfuzz import process
+import urllib.parse
 
 # Fungsi untuk menyimpan ulasan
 def save_review(user_review):
@@ -48,64 +50,82 @@ st.title('Manhwa Recommender System')
 # Sidebar
 page = st.sidebar.selectbox("Select Page:", ["Recommendation", "Review"])
 
+translator = Translator()
+
+def translate_to_english(text):
+    translated = translator.translate(text, src='id', dest='en')
+    return translated.text
+
+# Fuzzy match function
+def find_closest_titles(query, choices, limit=5):
+    results = process.extract(query, choices, limit=limit, scorer=process.fuzz.token_sort_ratio)
+    return [match for match, score, _ in results if score >= 70]
+
+# Recommendation functions
+def recommend_by_title(selected_title, top_n):
+    idx = manhwas[manhwas['title'] == selected_title].index[0]
+    distances = similarity[idx]
+    manhwa_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:top_n+1]
+    results = []
+    for i in manhwa_list:
+        row = manhwas.iloc[i[0]]
+        results.append({
+            'title': row['title'],
+            'cover_url': row['cover_url'],
+            'synopsis': row['synopsis'],
+            'genres': row['genres'],
+            'authors': row['authors'],
+            'score': row['score']
+        })
+    return results
+
+def recommend_by_keyword(user_input, top_n):
+    user_vec = tag_vectorizer.transform([user_input])
+    scores = cosine_similarity(user_vec, tag_vectors).flatten()
+    top_indices = scores.argsort()[::-1][:top_n]
+    results = []
+    for i in top_indices:
+        row = manhwas.iloc[i]
+        results.append({
+            'title': row['title'],
+            'cover_url': row['cover_url'],
+            'synopsis': row['synopsis'],
+            'genres': row['genres'],
+            'authors': row['authors'],
+            'score': row['score']
+        })
+    return results
+
 # Halaman Recommendation
 if page == "Recommendation":
     st.subheader("Recommendation Page")
 
     mode = st.radio("Select Recommendation Mode:", ["By Title", "By Keyword"])
 
-    translator = Translator()
-    def translate_to_english(text):
-        translated = translator.translate(text, src='id', dest='en')
-        return translated.text
-
-    def recommend_by_title(selected_title):
-        idx = manhwas[manhwas['title'] == selected_title].index[0]
-        distances = similarity[idx]
-        manhwa_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
-        results = []
-        for i in manhwa_list:
-            row = manhwas.iloc[i[0]]
-            results.append({
-                'title': row['title'],
-                'cover_url': row['cover_url'],
-                'synopsis': row['synopsis'],
-                'genres': row['genres'],
-                'authors': row['authors'],
-                'score': row['score']
-            })
-        return results
-
-    def recommend_by_keyword(user_input):
-        user_vec = tag_vectorizer.transform([user_input])
-        scores = cosine_similarity(user_vec, tag_vectors).flatten()
-        top_indices = scores.argsort()[::-1][:5]
-        results = []
-        for i in top_indices:
-            row = manhwas.iloc[i]
-            results.append({
-                'title': row['title'],
-                'cover_url': row['cover_url'],
-                'synopsis': row['synopsis'],
-                'genres': row['genres'],
-                'authors': row['authors'],
-                'score': row['score']
-            })
-        return results
-
     if 'results' not in st.session_state:
         st.session_state.results = []
+        st.session_state.selected_title_final = None
+
+    num_recommendations = 5  # default
 
     # Input
     if mode == "By Title":
-        selected_title = st.selectbox("Choose a Manhwa Title:", manhwas['title'].values)
+        title_input = st.text_input("Type the Manhwa Title:")
         if st.button("Find Recommendations"):
-            st.session_state.results = recommend_by_title(selected_title)
+            matches = find_closest_titles(title_input, manhwas['title'].values, limit=5)
+            if matches:
+                st.session_state.selected_title_final = matches[0]  # ambil yang paling mirip
+                st.success(f"Closest match: {st.session_state.selected_title_final}")
+                num_recommendations = st.selectbox("Jumlah rekomendasi:", [5, 10, 15, 20], index=0)
+                st.session_state.results = recommend_by_title(st.session_state.selected_title_final, num_recommendations)
+            else:
+                st.warning("No similar titles found.")
 
     elif mode == "By Keyword":
         user_input = st.text_input("Enter free keywords (genre, story style, etc.):")
         if st.button("Find Recommendations"):
-            st.session_state.results = recommend_by_keyword(user_input)
+            num_recommendations = st.selectbox("Jumlah rekomendasi:", [5, 10, 15, 20], index=0)
+            st.session_state.results = recommend_by_keyword(user_input, num_recommendations)
 
     results = st.session_state.results
     if results:
@@ -127,7 +147,9 @@ if page == "Recommendation":
 
                 if show_full:
                     st.markdown(html.escape(item['synopsis']))
-                    st.markdown("📖 *Baca Selengkapnya di KakaoPage atau Line Webtoon*")
+                    # Tambah link langsung ke Webtoon
+                    webtoon_search_url = "https://www.webtoons.com/id/search?keyword=" + urllib.parse.quote(item['title'])
+                    st.markdown(f"[🔍 Cari di Webtoon]({webtoon_search_url})", unsafe_allow_html=True)
                 else:
                     short = textwrap.shorten(item['synopsis'], width=200, placeholder="...")
                     st.markdown(html.escape(short))
