@@ -202,7 +202,7 @@ if page == "Recommendation":
                 display_to_real[t] = t
 
         if dropdown_display_options:
-            selected_display = st.selectbox("Select a Manhwa title from the dataset.:", dropdown_display_options, key="selectbox_title")
+            selected_display = st.selectbox("Select the Manhwa title that matches with your input:", dropdown_display_options, key="selectbox_title")
             # map back to real title
             selected_title = display_to_real.get(selected_display, selected_display)
         else:
