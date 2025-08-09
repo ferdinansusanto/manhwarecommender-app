@@ -13,6 +13,13 @@ from rapidfuzz import process, fuzz
 import urllib.parse
 
 # ---------------------------
+# Config / Constants
+# ---------------------------
+FUZZY_LIMIT = 5
+SUBSTRING_MAX_OPTIONS = 50  # cap jumlah hasil substring agar dropdown tidak terlalu panjang
+FUZZY_THRESHOLD = 0  # we will show top FUZZY_LIMIT even if score low when no substring match
+
+# ---------------------------
 # Helper: review persistence
 # ---------------------------
 def save_review(user_review):
@@ -33,58 +40,41 @@ def calculate_statistics(reviews):
 # ---------------------------
 # Load data (with helpful errors)
 # ---------------------------
-# Use cache so Streamlit doesn't reload heavy pickles every rerun unnecessarily
-@st.cache_data
-def load_manhwa_data():
-    try:
-        with gzip.open('manhwa_dict_with_cover.pkl.gz', 'rb') as f:
-            manhwa_dict = pickle.load(f)
-        manhwas_df = pd.DataFrame(manhwa_dict).fillna("")
-        if 'title' not in manhwas_df.columns:
-            raise ValueError("Kolom 'title' tidak ditemukan di dataset manhwa_dict_with_cover.pkl.gz")
-        return manhwas_df
-    except Exception as e:
-        raise
-
-@st.cache_data
-def load_similarity():
-    try:
-        with gzip.open('similarity.pkl.gz', 'rb') as f:
-            sim = pickle.load(f)
-        return sim
-    except Exception as e:
-        raise
-
-@st.cache_data
-def load_tag_resources():
-    try:
-        with gzip.open('tag_vectorizer.pkl.gz', 'rb') as f:
-            tv = pickle.load(f)
-        with gzip.open('tag_vectors.pkl.gz', 'rb') as f:
-            tvectors = pickle.load(f)
-        return tv, tvectors
-    except Exception:
-        return None, None
-
-# Attempt load and show friendly errors if missing
 try:
-    manhwas = load_manhwa_data()
-    titles_list_all = manhwas['title'].astype(str).tolist()
+    with gzip.open('manhwa_dict_with_cover.pkl.gz', 'rb') as f:
+        manhwa_dict = pickle.load(f)
+    manhwas = pd.DataFrame(manhwa_dict)
+    if 'title' not in manhwas.columns:
+        st.error("Kolom 'title' tidak ditemukan di dataset manhwa_dict_with_cover.pkl.gz")
+        st.stop()
+    # normalize titles as strings
+    manhwas['title'] = manhwas['title'].astype(str)
+    titles_list_all = manhwas['title'].dropna().astype(str).tolist()
 except Exception as e:
     st.error(f"Error memuat dataset manhwa: {e}")
     st.stop()
 
 try:
-    similarity = load_similarity()
+    with gzip.open('similarity.pkl.gz', 'rb') as f:
+        similarity = pickle.load(f)
+    # basic consistency check
+    if len(similarity) != len(manhwas):
+        st.warning("Peringatan: panjang similarity matrix tidak sama dengan jumlah manhwa. Periksa indexing jika rekomendasi berperilaku aneh.")
 except Exception as e:
     st.error(f"Error memuat similarity matrix: {e}")
     st.stop()
 
-tag_vectorizer, tag_vectors = load_tag_resources()
-# tag_vectorizer/tag_vectors may be None — keyword mode will show error accordingly
+try:
+    with gzip.open('tag_vectorizer.pkl.gz', 'rb') as f:
+        tag_vectorizer = pickle.load(f)
+    with gzip.open('tag_vectors.pkl.gz', 'rb') as f:
+        tag_vectors = pickle.load(f)
+except Exception as e:
+    tag_vectorizer = None
+    tag_vectors = None
 
 # ---------------------------
-# Utilities
+# Utility functions
 # ---------------------------
 translator = Translator()
 def translate_to_english(text):
@@ -94,56 +84,28 @@ def translate_to_english(text):
     except Exception:
         return text
 
-# fuzzy helper using rapidfuzz
-FUZZY_THRESHOLD = 60  # adjust if you want stricter/looser matching
-
-def fuzzy_top_matches(query, choices, limit=5):
-    """
-    Return list of (title, score) tuples sorted desc, but only those >= FUZZY_THRESHOLD.
-    """
+# fuzzy helper using rapidfuzz: returns list of tuples (display_label, real_title)
+def find_fuzzy_labels(query, choices, limit=FUZZY_LIMIT):
+    # results: (choice, score, idx)
     results = process.extract(query, choices, limit=limit, scorer=fuzz.token_sort_ratio)
-    # results: list of tuples (match, score, index)
-    filtered = [(match, score) for (match, score, idx) in results if score >= FUZZY_THRESHOLD]
-    return filtered
+    out = []
+    for choice, score, _ in results:
+        label = f"{choice} — {int(score)}%"
+        out.append((label, choice))
+    return out
 
-def search_titles_combined(query, max_options=10, fuzzy_limit=5):
-    """
-    Combined search:
-    - if substring (case-insensitive) matches exist -> return substring matches (up to max_options)
-    - else -> return fuzzy top matches (title strings) up to fuzzy_limit
-    """
-    if not query or not query.strip():
-        # By default return top subset of all titles to avoid massive dropdown (first 200)
-        return titles_list_all[:200]
-
-    # substring matches (case-insensitive)
-    substring_matches = manhwas[manhwas['title'].str.contains(query, case=False, na=False)]['title'].tolist()
-    if substring_matches:
-        # limit length for performance
-        return substring_matches[:max_options]
-    # else fallback fuzzy
-    fuzzy = fuzzy_top_matches(query, titles_list_all, limit=fuzzy_limit)
-    if fuzzy:
-        # return just titles, perhaps annotate score? For dropdown keep plain title
-        return [t for t, s in fuzzy]
-    # nothing
-    return []
-
-# Recommendation functions
-def recommend_by_title_include_self(selected_title, top_n):
-    """
-    Return top_n recommendations including the item itself at highest similarity (index 0).
-    """
+def recommend_by_title(selected_title, top_n):
+    # find index of selected_title
     try:
         idx = manhwas[manhwas['title'] == selected_title].index[0]
     except IndexError:
+        st.error("Selected title not found in dataset.")
         return []
     distances = similarity[idx]
-    # sort descending; include index 0 (self) as first
-    ranked = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])
-    top = [i for (i,score) in ranked][:top_n]  # take top_n indices including self (if self highest)
+    # get top indices sorted descending (include the title itself)
+    top_indices = distances.argsort()[::-1][:top_n]
     results = []
-    for i in top:
+    for i in top_indices:
         row = manhwas.iloc[i]
         results.append({
             'title': row['title'],
@@ -157,12 +119,14 @@ def recommend_by_title_include_self(selected_title, top_n):
 
 def recommend_by_keyword(user_input, top_n):
     if tag_vectorizer is None or tag_vectors is None:
+        st.error("Keyword recommendation tidak tersedia karena vectorizer/vectors tidak ditemukan.")
         return []
     try:
         user_vec = tag_vectorizer.transform([user_input])
         scores = cosine_similarity(user_vec, tag_vectors).flatten()
         top_indices = scores.argsort()[::-1][:top_n]
-    except Exception:
+    except Exception as e:
+        st.error(f"Error saat menghitung rekomendasi keyword: {e}")
         return []
     results = []
     for i in top_indices:
@@ -178,187 +142,170 @@ def recommend_by_keyword(user_input, top_n):
     return results
 
 # ---------------------------
-# Streamlit UI initializations
+# Streamlit UI
 # ---------------------------
-st.set_page_config(page_title="Manhwa Recommender", layout="wide")
 st.title('Manhwa Recommender System')
 
 # Sidebar
 page = st.sidebar.selectbox("Select Page:", ["Recommendation", "Review"])
 
-# Session state defaults
+# Initialize session state keys
 if 'results' not in st.session_state:
     st.session_state.results = []
-if 'selected_title' not in st.session_state:
-    st.session_state.selected_title = None
-if 'query' not in st.session_state:
-    st.session_state.query = ""
-if 'top_n' not in st.session_state:
-    st.session_state.top_n = 5
+if 'selected_title_for_recommendation' not in st.session_state:
+    st.session_state.selected_title_for_recommendation = None
 if 'last_mode' not in st.session_state:
     st.session_state.last_mode = None
 
-# ---------------------------
-# Recommendation Page
-# ---------------------------
+# --- Recommendation Page ---
 if page == "Recommendation":
     st.subheader("Recommendation Page")
-
     mode = st.radio("Select Recommendation Mode:", ["By Title", "By Keyword"])
 
     # ---------- By Title ----------
     if mode == "By Title":
-        st.markdown("Ketik sebagian judul di bawah — dropdown akan menampilkan *combined* matching: substring/full match (jika ada), atau fallback fuzzy-match (top 5) jika tidak ada substring match.")
+        st.markdown("Ketik sebagian judul di bawah — dropdown akan menampilkan *combined matching*: substring/full matches (jika ada) atau top fuzzy suggestions (jika tidak ada substring match).")
 
-        # input textbox for typing query; dropdown will be built from it
-        title_query = st.text_input("Type the Manhwa Title:", value=st.session_state.get('query', ''))
-        st.session_state.query = title_query
+        # text input for typing query
+        title_input = st.text_input("Type the Manhwa Title:", key="title_input")
 
-        # get dropdown options using combined logic
-        dropdown_options = search_titles_combined(title_query, max_options=50, fuzzy_limit=5)
+        # prepare dropdown options (combined behaviour)
+        dropdown_display_options = []
+        display_to_real = {}  # map displayed label back to real title
 
-        if not dropdown_options:
-            st.info("Tidak ada hasil pencarian untuk input ini.")
-            selected_title = None
-            # show disabled selectbox-like text
-            st.selectbox("Choose a Manhwa Title:", options=["(No results)"])
+        if title_input and title_input.strip():
+            q = title_input.strip()
+            # substring (case-insensitive) matches
+            substring_matches = manhwas[manhwas['title'].str.contains(q, case=False, na=False)]['title'].tolist()
+            if substring_matches:
+                # limit length for UI
+                substring_matches = substring_matches[:SUBSTRING_MAX_OPTIONS]
+                dropdown_display_options = substring_matches
+                for t in substring_matches:
+                    display_to_real[t] = t
+                st.info(f"Menampilkan {len(substring_matches)} hasil substring match.")
+            else:
+                # fallback to fuzzy matching
+                fuzzy = find_fuzzy_labels(q, titles_list_all, limit=FUZZY_LIMIT)
+                if fuzzy:
+                    dropdown_display_options = [label for label, real in fuzzy]
+                    for label, real in fuzzy:
+                        display_to_real[label] = real
+                    st.info("Tidak ada substring match — menampilkan suggestion terdekat (typo correction).")
+                else:
+                    dropdown_display_options = []
+                    st.warning("Tidak ditemukan judul yang cocok atau mirip di dataset.")
         else:
-            selected_title = st.selectbox("Choose a Manhwa Title:", options=dropdown_options, index=0)
-            st.session_state.selected_title = selected_title
+            # when input empty, we still may want to show some popular options or all titles (capped)
+            dropdown_display_options = titles_list_all[:SUBSTRING_MAX_OPTIONS]
+            for t in dropdown_display_options:
+                display_to_real[t] = t
 
-        # When user clicks Find Recommendations => immediately show default 5 recommendations (include self)
-        if st.button("Find Recommendations", key='find_title'):
+        if dropdown_display_options:
+            selected_display = st.selectbox("Choose a Manhwa Title:", dropdown_display_options, key="selectbox_title")
+            # map back to real title
+            selected_title = display_to_real.get(selected_display, selected_display)
+        else:
+            selected_display = None
+            selected_title = None
+
+        # Find Recommendations button: immediately show default 5 recommendations including the selected title
+        if st.button("Find Recommendations", key='find_by_title'):
             if not selected_title:
                 st.warning("Silakan pilih judul terlebih dahulu dari dropdown.")
             else:
-                st.session_state.top_n = 5  # default
-                st.session_state.results = recommend_by_title_include_self(selected_title, st.session_state.top_n)
-                st.session_state.last_mode = "title"
+                st.session_state.selected_title_for_recommendation = selected_title
+                st.session_state.results = recommend_by_title(selected_title, 5)
 
-        # If results present and last_mode title, show them and show buttons to change top_n
-        if st.session_state.results and st.session_state.last_mode == "title":
-            st.subheader("Recommendations:")
-            for idx, item in enumerate(st.session_state.results):
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    if item['cover_url']:
-                        try:
-                            st.image(item['cover_url'], width=120)
-                        except Exception:
-                            st.text("(cover load failed)")
-                    else:
-                        st.text("(no cover)")
-                with col2:
-                    st.markdown(f"### {item['title']}")
-                    st.markdown(f"**Author:** {item.get('authors','')}")
-                    st.markdown(f"**Genre:** {item.get('genres','')}")
-                    if item.get('score') is not None:
-                        st.markdown(f"**Score:** {item.get('score')}")
-                    checkbox_key = f"show_synopsis_title_{idx}"
-                    show_full = st.checkbox("📖 Show full synopsis", key=checkbox_key)
-                    if show_full:
-                        st.markdown(html.escape(item.get('synopsis','')))
-                        webtoon_search_url = "https://www.webtoons.com/id/search?keyword=" + urllib.parse.quote(item['title'])
-                        st.markdown(f'<a href="{webtoon_search_url}" target="_blank">🔍 Baca/ Cari di Webtoon</a>', unsafe_allow_html=True)
-                    else:
-                        short = textwrap.shorten(item.get('synopsis',''), width=200, placeholder="...")
-                        st.markdown(html.escape(short))
-                st.markdown("---")
+        # Quick-size buttons: only show if we already have a selected title stored
+        if st.session_state.selected_title_for_recommendation:
+            if st.session_state.selected_title_for_recommendation != selected_title and selected_title:
+                # If user picked a new title but hasn't pressed Find, update the selected stored value so grow buttons act on latest choice
+                st.session_state.selected_title_for_recommendation = selected_title
 
-            # Buttons to change number of recommendations on the fly
-            st.write("Ubah jumlah rekomendasi:")
+            # Show quick-change buttons horizontally
+            st.markdown("**Quick change jumlah rekomendasi**")
             c1, c2, c3, c4 = st.columns(4)
-            if c1.button("5"):
-                st.session_state.top_n = 5
-                # recalc based on last selected title
-                if st.session_state.selected_title:
-                    st.session_state.results = recommend_by_title_include_self(st.session_state.selected_title, st.session_state.top_n)
-            if c2.button("10"):
-                st.session_state.top_n = 10
-                if st.session_state.selected_title:
-                    st.session_state.results = recommend_by_title_include_self(st.session_state.selected_title, st.session_state.top_n)
-            if c3.button("15"):
-                st.session_state.top_n = 15
-                if st.session_state.selected_title:
-                    st.session_state.results = recommend_by_title_include_self(st.session_state.selected_title, st.session_state.top_n)
-            if c4.button("20"):
-                st.session_state.top_n = 20
-                if st.session_state.selected_title:
-                    st.session_state.results = recommend_by_title_include_self(st.session_state.selected_title, st.session_state.top_n)
+            with c1:
+                if st.button("5", key="btn_5"):
+                    st.session_state.results = recommend_by_title(st.session_state.selected_title_for_recommendation, 5)
+            with c2:
+                if st.button("10", key="btn_10"):
+                    st.session_state.results = recommend_by_title(st.session_state.selected_title_for_recommendation, 10)
+            with c3:
+                if st.button("15", key="btn_15"):
+                    st.session_state.results = recommend_by_title(st.session_state.selected_title_for_recommendation, 15)
+            with c4:
+                if st.button("20", key="btn_20"):
+                    st.session_state.results = recommend_by_title(st.session_state.selected_title_for_recommendation, 20)
 
     # ---------- By Keyword ----------
     elif mode == "By Keyword":
-        st.markdown("Masukkan kata kunci (genre, deskripsi, gaya cerita) untuk rekomendasi berdasarkan tag/content.")
-        user_input = st.text_input("Enter free keywords (genre, story style, etc.):", value=st.session_state.get('query', ''))
+        st.markdown("Masukkan kata kunci (genre, deskripsi, gaya cerita) untuk mencari rekomendasi berdasarkan tag/content.")
+        user_input = st.text_input("Enter free keywords (genre, story style, etc.):", key="keyword_input")
 
-        # store keyword in session state too
-        st.session_state.query = user_input
-
-        if st.button("Find Recommendations", key='find_keyword'):
+        if st.button("Find Recommendations", key='find_by_keyword'):
             if not user_input or not user_input.strip():
                 st.warning("Silakan masukkan kata kunci.")
             else:
-                # default 5
-                st.session_state.top_n = 5
-                recs = recommend_by_keyword(user_input.strip(), st.session_state.top_n)
-                if recs:
-                    st.session_state.results = recs
-                    st.session_state.last_mode = "keyword"
-                else:
-                    # if tag resources missing, give feedback
-                    if tag_vectorizer is None or tag_vectors is None:
-                        st.error("Keyword recommendation tidak tersedia (tag_vectorizer/tag_vectors tidak ditemukan).")
-                    else:
-                        st.info("Tidak ditemukan rekomendasi berdasarkan kata kunci tersebut.")
+                st.session_state.selected_title_for_recommendation = None
+                st.session_state.results = recommend_by_keyword(user_input.strip(), 5)
 
-        # when results exist for keyword
-        if st.session_state.results and st.session_state.last_mode == "keyword":
-            st.subheader("Recommendations:")
-            for idx, item in enumerate(st.session_state.results):
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    if item['cover_url']:
-                        try:
-                            st.image(item['cover_url'], width=120)
-                        except Exception:
-                            st.text("(cover load failed)")
-                    else:
-                        st.text("(no cover)")
-                with col2:
-                    st.markdown(f"### {item['title']}")
-                    st.markdown(f"**Author:** {item.get('authors','')}")
-                    st.markdown(f"**Genre:** {item.get('genres','')}")
-                    if item.get('score') is not None:
-                        st.markdown(f"**Score:** {item.get('score')}")
-                    checkbox_key = f"show_synopsis_kw_{idx}"
-                    show_full = st.checkbox("📖 Show full synopsis", key=checkbox_key)
-                    if show_full:
-                        st.markdown(html.escape(item.get('synopsis','')))
-                        webtoon_search_url = "https://www.webtoons.com/id/search?keyword=" + urllib.parse.quote(item['title'])
-                        st.markdown(f'<a href="{webtoon_search_url}" target="_blank">🔍 Baca/ Cari di Webtoon</a>', unsafe_allow_html=True)
-                    else:
-                        short = textwrap.shorten(item.get('synopsis',''), width=200, placeholder="...")
-                        st.markdown(html.escape(short))
-                st.markdown("---")
-
-            # Buttons to change number of recommendations on the fly (re-run keyword recalc)
-            st.write("Ubah jumlah rekomendasi:")
+        # quick-size buttons for keyword mode too (applies if results exist)
+        if st.session_state.results:
+            st.markdown("**Quick change jumlah rekomendasi**")
             c1, c2, c3, c4 = st.columns(4)
-            if c1.button("5", key='k5'):
-                st.session_state.top_n = 5
-                st.session_state.results = recommend_by_keyword(st.session_state.query, st.session_state.top_n)
-            if c2.button("10", key='k10'):
-                st.session_state.top_n = 10
-                st.session_state.results = recommend_by_keyword(st.session_state.query, st.session_state.top_n)
-            if c3.button("15", key='k15'):
-                st.session_state.top_n = 15
-                st.session_state.results = recommend_by_keyword(st.session_state.query, st.session_state.top_n)
-            if c4.button("20", key='k20'):
-                st.session_state.top_n = 20
-                st.session_state.results = recommend_by_keyword(st.session_state.query, st.session_state.top_n)
+            with c1:
+                if st.button("5", key="kbtn_5"):
+                    # need to re-run keyword recommendation with 5
+                    if user_input and user_input.strip():
+                        st.session_state.results = recommend_by_keyword(user_input.strip(), 5)
+            with c2:
+                if st.button("10", key="kbtn_10"):
+                    if user_input and user_input.strip():
+                        st.session_state.results = recommend_by_keyword(user_input.strip(), 10)
+            with c3:
+                if st.button("15", key="kbtn_15"):
+                    if user_input and user_input.strip():
+                        st.session_state.results = recommend_by_keyword(user_input.strip(), 15)
+            with c4:
+                if st.button("20", key="kbtn_20"):
+                    if user_input and user_input.strip():
+                        st.session_state.results = recommend_by_keyword(user_input.strip(), 20)
 
-    # ---------- Common: Review form under recommendations ----------
-    if (st.session_state.results and st.session_state.last_mode in ["title", "keyword"]):
+    # ---------- Show results ----------
+    results = st.session_state.results
+    if results:
+        st.subheader("Recommendations:")
+        for idx, item in enumerate(results):
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if item['cover_url']:
+                    try:
+                        st.image(item['cover_url'], width=120)
+                    except Exception:
+                        st.text("(cover load failed)")
+                else:
+                    st.text("(no cover)")
+            with col2:
+                st.markdown(f"### {item['title']}")
+                st.markdown(f"**Author:** {item.get('authors','')}")
+                st.markdown(f"**Genre:** {item.get('genres','')}")
+                if item.get('score') is not None:
+                    st.markdown(f"**Score:** {item.get('score')}")
+                checkbox_key = f"show_synopsis_{idx}"
+                show_full = st.checkbox("📖 Show full synopsis", key=checkbox_key)
+                if show_full:
+                    st.markdown(html.escape(item.get('synopsis','')))
+                    # Link to Webtoon search (encoded) — open in new tab
+                    webtoon_search_url = "https://www.webtoons.com/id/search?keyword=" + urllib.parse.quote(item['title'])
+                    st.markdown(f'<a href="{webtoon_search_url}" target="_blank" rel="noopener">🔍 Baca/ Cari di Webtoon</a>', unsafe_allow_html=True)
+                else:
+                    short = textwrap.shorten(item.get('synopsis',''), width=200, placeholder="...")
+                    st.markdown(html.escape(short))
+            st.markdown("---")
+
+        # review form (same as before)
         with st.expander("📬 Submit a Review for a Manhwa"):
             username = st.text_input("User Name:", key="rec_username")
             rating = st.slider("Rating (1-5):", 1, 5, key="rec_rating")
@@ -372,12 +319,9 @@ if page == "Recommendation":
                 save_review(user_review)
                 st.success("Review submitted successfully!")
 
-# ---------------------------
-# Review Page (unchanged core behavior)
-# ---------------------------
+# --- Review Page ---
 elif page == "Review":
     st.subheader("User Review")
-
     username = st.text_input("User Name:")
     rating = st.slider("Rating (1-5):", 1, 5)
     review_text = st.text_area("Write a Review:")
