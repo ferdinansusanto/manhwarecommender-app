@@ -17,7 +17,7 @@ import urllib.parse
 # ---------------------------
 FUZZY_LIMIT = 5
 SUBSTRING_MAX_OPTIONS = 50  # cap jumlah hasil substring agar dropdown tidak terlalu panjang
-FUZZY_THRESHOLD = 0  # we will show top FUZZY_LIMIT even if score low when no substring match
+FUZZY_THRESHOLD = 0  # minimal score untuk ditampilkan dalam fuzzy (0 = tampilkan semua top-N)
 
 # ---------------------------
 # Helper: review persistence
@@ -50,6 +50,8 @@ try:
     # normalize titles as strings
     manhwas['title'] = manhwas['title'].astype(str)
     titles_list_all = manhwas['title'].dropna().astype(str).tolist()
+    # precompute lowercase titles for case-insensitive fuzzy match
+    titles_list_all_lower = [t.strip().lower() for t in titles_list_all]
 except Exception as e:
     st.error(f"Error loading manhwa dataset: {e}")
     st.stop()
@@ -84,14 +86,30 @@ def translate_to_english(text):
     except Exception:
         return text
 
-# fuzzy helper using rapidfuzz: returns list of tuples (display_label, real_title)
-def find_fuzzy_labels(query, choices, limit=FUZZY_LIMIT):
-    # results: (choice, score, idx)
-    results = process.extract(query, choices, limit=limit, scorer=fuzz.token_sort_ratio)
+# fuzzy helper using rapidfuzz (case-insensitive): returns list of tuples (display_label, real_title)
+def find_fuzzy_labels_case_insensitive(query, choices, choices_lower, limit=FUZZY_LIMIT):
+    """
+    query: raw user query
+    choices: list of original titles
+    choices_lower: list of lowercased titles aligned with choices
+    returns: list of tuples (display_label, original_title)
+    """
+    q = query.strip().lower()
+    # compare against lowercased choices
+    results = process.extract(q, choices_lower, limit=limit, scorer=fuzz.token_sort_ratio)
     out = []
-    for choice, score, _ in results:
-        label = f"{choice} — {int(score)}%"
-        out.append((label, choice))
+    # collect results that meet threshold
+    for matched_lower, score, idx in results:
+        original_title = choices[idx]
+        if score >= FUZZY_THRESHOLD:
+            label = f"{original_title} — {int(score)}%"
+            out.append((label, original_title))
+    # if nothing passed threshold (and threshold > 0), fall back to top results anyway
+    if not out and results:
+        for matched_lower, score, idx in results:
+            original_title = choices[idx]
+            label = f"{original_title} — {int(score)}%"
+            out.append((label, original_title))
     return out
 
 def recommend_by_title(selected_title, top_n):
@@ -185,8 +203,8 @@ if page == "Recommendation":
                     display_to_real[t] = t
                 st.info(f"Displaying {len(substring_matches)} title matches.")
             else:
-                # fallback to fuzzy matching
-                fuzzy = find_fuzzy_labels(q, titles_list_all, limit=FUZZY_LIMIT)
+                # fallback to fuzzy matching (case-insensitive)
+                fuzzy = find_fuzzy_labels_case_insensitive(q, titles_list_all, titles_list_all_lower, limit=FUZZY_LIMIT)
                 if fuzzy:
                     dropdown_display_options = [label for label, real in fuzzy]
                     for label, real in fuzzy:
